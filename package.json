@@ -1,0 +1,16 @@
+{
+  "name": "odys",
+  "version": "1.0.0",
+  "description": "Odyssée de la Sagesse — PWA + TWA Android",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "validate:manifest": "node scripts/validate-pwa.js",
+    "validate:sw":       "node scripts/validate-sw.js",
+    "fix:pwa":           "node scripts/fix-pwa.js",
+    "build:twa":         "node scripts/build-twa.js"
+  }
+}

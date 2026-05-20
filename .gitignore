@@ -1,0 +1,38 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Android build
+android-twa/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Gradle
+.gradle/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CI artifacts
+odys-debug.apk
+odys-aligned.apk
+android.keystore
+
+# Gradle wrapper — NE PAS IGNORER ces fichiers (bundlés dans le dépôt)
+# Les règles ci-dessous annulent les exclusions génériques Gradle
+!gradle-wrapper/
+!gradle-wrapper/**
+!gradle-wrapper/gradle/wrapper/gradle-wrapper.jar
+!gradle-wrapper/gradlew
+!gradle-wrapper/gradlew.bat

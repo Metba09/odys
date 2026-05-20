@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#af944d">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="odys">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+    <title>Odyssée de la Sagesse | Éditorial Prestige</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --paper: #f9f7f2;
+            --ink: #1a1a1a;
+            --gold-leaf: #af944d;
+        }
+
+        * { box-sizing: border-box; }
+        
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: var(--paper);
+            color: var(--ink);
+            font-family: 'Playfair Display', serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Texture papier organique pour le côté "objet d'art" */
+        body::before {
+            content: "";
+            position: absolute; width: 100%; height: 100%;
+            background-image: url('https://www.transparenttextures.com/patterns/natural-paper.png');
+            opacity: 0.5; pointer-events: none; z-index: 1;
+        }
+
+        /* Conteneur principal centré */
+        .viewport {
+            position: relative;
+            z-index: 10;
+            width: 85vw;
+            max-width: 1200px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Typographie Motion Design */
+        #karaoke-box {
+            font-size: clamp(2.5rem, 5.5vw, 5rem);
+            line-height: 1.2;
+            margin-bottom: 2rem;
+            min-height: 300px; /* Évite les sauts de mise en page */
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-content: center;
+        }
+
+        .word {
+            display: inline-block;
+            color: rgba(26, 26, 26, 0.1); /* Couleur de base très légère */
+            transition: all 0.4s cubic-bezier(0.2, 0, 0.2, 1);
+            margin: 0 0.25em;
+        }
+
+        /* État "Lu" (Noir) */
+        .word.active {
+            color: var(--ink);
+        }
+
+        /* État "En cours" (Doré & Italique) */
+        .word.highlight {
+            color: var(--gold-leaf);
+            font-style: italic;
+            transform: scale(1.1) translateY(-5px);
+            text-shadow: 0 10px 20px rgba(175, 148, 77, 0.2);
+        }
+
+        /* Bouton Start minimaliste */
+        #btn-start {
+            background: none;
+            border: 1px solid var(--ink);
+            color: var(--ink);
+            padding: 1rem 2.5rem;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.4em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.8rem;
+        }
+
+        #btn-start:hover {
+            background: var(--ink);
+            color: var(--paper);
+            letter-spacing: 0.5em;
+        }
+
+        /* Filigrane discret */
+        .branding {
+            position: absolute;
+            bottom: 40px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.3em;
+            opacity: 0.4;
+        }
+    </style>
+</head>
+<body>
+
+<div class="viewport">
+    <div id="karaoke-box">
+        <span class="word active">Odyssée</span>
+        <span class="word active">de</span>
+        <span class="word active">la</span>
+        <span class="word active highlight">Sagesse</span>
+    </div>
+    <button id="btn-start">Lancer le récit</button>
+</div>
+
+<div class="branding">The Wisdom Odyssey — MMXVI</div>
+
+<script>
+/**
+ * Données synchronisées issues de Séquence 01 (1).srt
+ */
+const sequence = [
+    { start: 0, end: 2, text: "Odyssée de la Sagesse" },
+    { start: 2, end: 9, text: "Dans une vallée à perte de vue, entre des montagnes et un fleuve aux eaux cristallines, s'élevait une forteresse mystérieuse." },
+    { start: 9, end: 15.5, text: "On l'appelait la forteresse de la Sagesse, et seuls ceux qui cherchaient avec un cœur sincère pouvaient y entrer." },
+    { start: 15.5, end: 21, text: "Au pied de cette forteresse se dressait une porte basse, si étroite qu'il fallait se rabaisser pour passer." },
+    { start: 21, end: 24, text: "Un vieillard y veillait, le regard empreint de douceur." },
+    { start: 24, end: 27.5, text: "— Que veillait-tu ? demanda-t-il à chaque voyageur." },
+    { start: 35.5, end: 44, text: "Ceux qui entrent ici doivent laisser leurs certitudes, comme on dépose un fardeau trop lourd. La Sagesse ne se donne qu'aux humbles." },
+    { start: 51, end: 58.5, text: "La Fontaine de la Mémoire : Ses eaux reflétaient les leçons du passé." },
+    { start: 58.5, end: 65.5, text: "La Fontaine du Discernement : Son flot était pur et transparent." },
+    { start: 65.5, end: 73, text: "La Fontaine de la charité : Son onde était chaude comme un rayon de soleil." },
+    { start: 138, end: 144, text: "La Sagesse n'est pas un lieu où l'on arrive, mais une manière de marcher." }
+];
+
+const box = document.getElementById('karaoke-box');
+const btn = document.getElementById('btn-start');
+let startTime = 0;
+
+function run() {
+    btn.style.display = 'none';
+    startTime = performance.now();
+    requestAnimationFrame(update);
+}
+
+function update(now) {
+    const elapsed = (now - startTime) / 1000;
+    const current = sequence.find(s => elapsed >= s.start && elapsed <= s.end);
+
+    if (current) {
+        if (box.dataset.id !== current.start.toString()) {
+            box.dataset.id = current.start;
+            box.innerHTML = current.text.split(' ').map(w => `<span class="word">${w}</span>`).join(' ');
+        }
+
+        const words = box.querySelectorAll('.word');
+        const progress = (elapsed - current.start) / (current.end - current.start);
+        const activeIdx = Math.floor(progress * words.length);
+
+        words.forEach((el, i) => {
+            if (i === activeIdx) {
+                el.className = 'word active highlight';
+            } else if (i < activeIdx) {
+                el.className = 'word active';
+            } else {
+                el.className = 'word';
+            }
+        });
+    } else if (elapsed > sequence[sequence.length - 1].end) {
+        box.style.opacity = "0.3";
+    } else {
+        // Optionnel : un petit texte d'attente ou vide entre les phrases
+    }
+
+    if (elapsed < sequence[sequence.length - 1].end + 2) {
+        requestAnimationFrame(update);
+    }
+}
+
+btn.addEventListener('click', run);
+</script>
+
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js')
+        .then(r => console.log('[odys] SW registered', r.scope))
+        .catch(e => console.warn('[odys] SW failed', e));
+    });
+  }
+</script>
+</body>
+</html>
