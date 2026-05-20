@@ -1,0 +1,485 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Odyssée de la Sagesse — GitHub Actions CI/CD  v8                      ║
+# ║  Fix: génération Android directe sans bubblewrap init CI               ║
+# ║  AGP 8.5 + Gradle 8.9 + SDK 35 + minSdk 29                            ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+name: "🏺 Build Android APK (TWA)"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions:  write
+
+env:
+  NODE_VERSION:   "20"
+  JAVA_VERSION:   "17"
+  ANDROID_SDK:    "35"
+  BUILD_TOOLS:    "35.0.0"
+  GRADLE_VERSION: "8.9"
+  KEYSTORE_PASS:  "odys-debug"
+  KEYSTORE_ALIAS: "odys-key"
+
+jobs:
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  JOB 1 — Validation PWA                                         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+  validate-pwa:
+    name: "🔍 Validate PWA"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}" }
+
+      - run: node scripts/fix-pwa.js
+      - run: node scripts/validate-pwa.js
+      - run: node scripts/validate-sw.js
+
+      - name: "🎨 Check icons"
+        run: |
+          MISSING=0
+          for SIZE in 72 96 128 144 152 192 384 512; do
+            [ -f "icons/icon-${SIZE}x${SIZE}.png" ] \
+              && echo "  ✅ icon-${SIZE}x${SIZE}.png" \
+              || { echo "  ❌ MANQUANT: icon-${SIZE}x${SIZE}.png"; MISSING=$((MISSING+1)); }
+          done
+          [ $MISSING -gt 0 ] && exit 1 || echo "✅ Toutes les icônes OK"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pwa-validation-report
+          path: manifest.json
+          retention-days: 7
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  JOB 2 — Build Android APK                                      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+  build-android:
+    name: "🤖 Build Android APK"
+    runs-on: ubuntu-latest
+    needs: validate-pwa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}" }
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: "temurin"
+
+      - name: "🗄️ Cache Gradle"
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists/gradle-${{ env.GRADLE_VERSION }}-bin
+          key: gradle-${{ runner.os }}-${{ env.GRADLE_VERSION }}-v8
+          restore-keys: |
+            gradle-${{ runner.os }}-${{ env.GRADLE_VERSION }}-
+            gradle-${{ runner.os }}-
+
+      - uses: android-actions/setup-android@v3
+
+      - name: "📱 Install SDK components"
+        run: |
+          echo "y" | sdkmanager \
+            "platform-tools" \
+            "platforms;android-${{ env.ANDROID_SDK }}" \
+            "build-tools;${{ env.BUILD_TOOLS }}" \
+            2>&1 | grep -v "^Warning" || true
+
+      - name: "🔑 Generate debug keystore"
+        run: |
+          keytool -genkeypair \
+            -keystore android.keystore \
+            -alias "${{ env.KEYSTORE_ALIAS }}" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "${{ env.KEYSTORE_PASS }}" \
+            -keypass   "${{ env.KEYSTORE_PASS }}" \
+            -dname "CN=odys Debug, OU=CI, O=GitHub, L=Cloud, ST=CI, C=FR" \
+            2>&1 | grep -v "^Warning" || true
+          ls -lh android.keystore
+          echo "✅ Keystore généré"
+
+      # ── Lire les infos du manifest TWA ──────────────────────────
+      - name: "📝 Parse TWA manifest"
+        id: twa
+        run: |
+          PACKAGE=$(node -e "console.log(require('./twa-manifest.json').packageId)")
+          APPNAME=$(node -e "console.log(require('./twa-manifest.json').name)")
+          HOST=$(node    -e "console.log(require('./twa-manifest.json').host)")
+          STARTURL=$(node -e "console.log(require('./twa-manifest.json').startUrl)")
+          FULLSCOPE=$(node -e "console.log(require('./twa-manifest.json').fullScopeUrl)")
+          echo "package=$PACKAGE"   >> "$GITHUB_OUTPUT"
+          echo "appname=$APPNAME"   >> "$GITHUB_OUTPUT"
+          echo "host=$HOST"         >> "$GITHUB_OUTPUT"
+          echo "starturl=$STARTURL" >> "$GITHUB_OUTPUT"
+          echo "fullscope=$FULLSCOPE" >> "$GITHUB_OUTPUT"
+          echo "✅ packageId  : $PACKAGE"
+          echo "✅ host       : $HOST"
+          echo "✅ startUrl   : $STARTURL"
+
+      # ── Générer le projet Android TWA directement ────────────────
+      # Évite le bug bubblewrap init en CI (stdin non-TTY → crash)
+      - name: "🏗️ Generate Android TWA project"
+        env:
+          PACKAGE:  ${{ steps.twa.outputs.package }}
+          APPNAME:  ${{ steps.twa.outputs.appname }}
+          HOST:     ${{ steps.twa.outputs.host }}
+          STARTURL: ${{ steps.twa.outputs.starturl }}
+          FULLSCOPE: ${{ steps.twa.outputs.fullscope }}
+        run: |
+          TWA_DIR="android-twa"
+          mkdir -p "$TWA_DIR/app/src/main/res/values"
+          mkdir -p "$TWA_DIR/app/src/main/res/xml"
+          mkdir -p "$TWA_DIR/app/src/main/res/drawable"
+          mkdir -p "$TWA_DIR/app/src/main/java/$(echo $PACKAGE | tr '.' '/')"
+
+          # ── settings.gradle ────────────────────────────────────
+          cat > "$TWA_DIR/settings.gradle" << 'SETTINGS'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "OdysTWA"
+          include ':app'
+          SETTINGS
+
+          # ── build.gradle (root) ────────────────────────────────
+          cat > "$TWA_DIR/build.gradle" << 'ROOTGRADLE'
+          plugins {
+              id 'com.android.application' version '8.5.0' apply false
+          }
+          ROOTGRADLE
+
+          # ── app/build.gradle ───────────────────────────────────
+          cat > "$TWA_DIR/app/build.gradle" << APPGRADLE
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace '$PACKAGE'
+              compileSdk 35
+              defaultConfig {
+                  applicationId '$PACKAGE'
+                  minSdk 29
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0.0'
+              }
+              buildTypes {
+                  debug {
+                      debuggable true
+                      signingConfig signingConfigs.debug
+                  }
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }
+              }
+              signingConfigs {
+                  debug {
+                      storeFile file('../../android.keystore')
+                      storePassword '${{ env.KEYSTORE_PASS }}'
+                      keyAlias '${{ env.KEYSTORE_ALIAS }}'
+                      keyPassword '${{ env.KEYSTORE_PASS }}'
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          dependencies {
+              implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+          }
+          APPGRADLE
+
+          # ── AndroidManifest.xml ────────────────────────────────
+          cat > "$TWA_DIR/app/src/main/AndroidManifest.xml" << MANIFEST
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <application
+                android:label="$APPNAME"
+                android:theme="@style/AppTheme"
+                android:icon="@drawable/ic_launcher"
+                android:supportsRtl="true"
+                android:allowBackup="false">
+
+              <activity
+                  android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+                  android:exported="true"
+                  android:screenOrientation="unspecified">
+                <meta-data
+                    android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                    android:value="https://$HOST$STARTURL"/>
+                <meta-data
+                    android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                    android:resource="@color/colorPrimary"/>
+                <meta-data
+                    android:name="android.support.customtabs.trusted.SPLASH_IMAGE_DRAWABLE"
+                    android:resource="@drawable/splash"/>
+                <meta-data
+                    android:name="android.support.customtabs.trusted.SPLASH_SCREEN_FADE_OUT_DURATION"
+                    android:value="300"/>
+                <meta-data
+                    android:name="android.support.customtabs.trusted.FILE_PROVIDER_AUTHORITY"
+                    android:value="$PACKAGE.fileprovider"/>
+                <intent-filter android:autoVerify="true">
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+                <intent-filter android:autoVerify="true">
+                  <action android:name="android.intent.action.VIEW"/>
+                  <category android:name="android.intent.category.DEFAULT"/>
+                  <category android:name="android.intent.category.BROWSABLE"/>
+                  <data android:scheme="https" android:host="$HOST" android:pathPrefix="/odys"/>
+                </intent-filter>
+              </activity>
+
+              <provider
+                  android:name="androidx.core.content.FileProvider"
+                  android:authorities="$PACKAGE.fileprovider"
+                  android:exported="false"
+                  android:grantUriPermissions="true">
+                <meta-data
+                    android:name="android.support.FILE_PROVIDER_PATHS"
+                    android:resource="@xml/file_paths"/>
+              </provider>
+
+              <service
+                  android:name="com.google.androidbrowserhelper.trusted.DelegationService"
+                  android:exported="true"
+                  android:enabled="true">
+                <intent-filter>
+                  <action android:name="android.support.customtabs.trusted.TRUSTED_WEB_ACTIVITY_SERVICE"/>
+                  <category android:name="android.intent.category.DEFAULT"/>
+                </intent-filter>
+              </service>
+
+            </application>
+          </manifest>
+          MANIFEST
+
+          # ── res/values/colors.xml ──────────────────────────────
+          cat > "$TWA_DIR/app/src/main/res/values/colors.xml" << 'COLORS'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <color name="colorPrimary">#AF944D</color>
+            <color name="colorPrimaryDark">#8B7A3A</color>
+            <color name="colorAccent">#AF944D</color>
+            <color name="backgroundColor">#F9F7F2</color>
+          </resources>
+          COLORS
+
+          # ── res/values/strings.xml ─────────────────────────────
+          cat > "$TWA_DIR/app/src/main/res/values/strings.xml" << STRINGS
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <string name="app_name">$APPNAME</string>
+          </resources>
+          STRINGS
+
+          # ── res/values/styles.xml ──────────────────────────────
+          cat > "$TWA_DIR/app/src/main/res/values/styles.xml" << 'STYLES'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <style name="AppTheme" parent="android:Theme.NoTitleBar.Fullscreen">
+              <item name="android:windowBackground">@color/backgroundColor</item>
+              <item name="android:statusBarColor">@color/colorPrimary</item>
+            </style>
+          </resources>
+          STYLES
+
+          # ── res/xml/file_paths.xml ─────────────────────────────
+          cat > "$TWA_DIR/app/src/main/res/xml/file_paths.xml" << 'FILEPATHS'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+            <cache-path name="cache" path="."/>
+          </paths>
+          FILEPATHS
+
+          # ── drawable splash (vide) ─────────────────────────────
+          cat > "$TWA_DIR/app/src/main/res/drawable/splash.xml" << 'SPLASH'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+            <item><color android:color="@color/backgroundColor"/></item>
+          </layer-list>
+          SPLASH
+
+          # ── drawable ic_launcher (simple) ─────────────────────
+          cat > "$TWA_DIR/app/src/main/res/drawable/ic_launcher.xml" << 'ICON'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@color/colorPrimary"/>
+            <foreground android:drawable="@color/backgroundColor"/>
+          </adaptive-icon>
+          ICON
+
+          # ── gradle.properties ──────────────────────────────────
+          JDK_PATH=$(dirname $(dirname $(readlink -f $(which java))))
+          cat > "$TWA_DIR/gradle.properties" << PROPS
+          org.gradle.java.home=$JDK_PATH
+          org.gradle.daemon=false
+          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          android.useAndroidX=true
+          android.enableJetifier=true
+          PROPS
+
+          echo "✅ Projet Android TWA généré"
+          find "$TWA_DIR" -maxdepth 4 | sort
+
+      # ── Injecter le Gradle wrapper bundlé ───────────────────────
+      - name: "🔧 Inject Gradle wrapper"
+        run: |
+          TWA_DIR="android-twa"
+          mkdir -p "$TWA_DIR/gradle/wrapper"
+
+          cp gradle-wrapper/gradlew           "$TWA_DIR/gradlew"
+          cp gradle-wrapper/gradlew.bat       "$TWA_DIR/gradlew.bat"
+          chmod +x "$TWA_DIR/gradlew"
+
+          cp gradle-wrapper/gradle/wrapper/gradle-wrapper.jar \
+             "$TWA_DIR/gradle/wrapper/gradle-wrapper.jar"
+          cp gradle-wrapper/gradle/wrapper/gradle-wrapper.properties \
+             "$TWA_DIR/gradle/wrapper/gradle-wrapper.properties"
+
+          echo "✅ Gradle wrapper injecté"
+          ls -lh "$TWA_DIR/gradlew" "$TWA_DIR/gradle/wrapper/"*
+
+      # ── Sanitize gradlew (CRLF → LF + permissions) ──────────────
+      - name: "🧹 Sanitize gradlew line endings"
+        run: |
+          # Convertir CRLF→LF si Git a corrompu les fins de ligne
+          sed -i 's/\r$//' android-twa/gradlew
+          chmod +x android-twa/gradlew
+          # Vérifier DEFAULT_JVM_OPTS (bug guillemets imbriqués)
+          grep "DEFAULT_JVM_OPTS" android-twa/gradlew
+          echo "✅ gradlew OK"
+
+      # ── Build APK ────────────────────────────────────────────────
+      - name: "🔨 Build APK (Gradle assembleDebug)"
+        run: |
+          cd android-twa
+          echo "── Démarrage assembleDebug ──"
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --info \
+            2>&1 | tee /tmp/gradle.log
+          GRADLE_EXIT=${PIPESTATUS[0]}
+
+          echo ""
+          echo "── Exit code Gradle : $GRADLE_EXIT ──"
+          if [ $GRADLE_EXIT -ne 0 ]; then
+            echo "❌ Build Gradle échoué (exit $GRADLE_EXIT)"
+            echo "── Erreurs détectées ──"
+            grep -i "error\|FAILED\|Exception\|Could not\|Caused by" /tmp/gradle.log | tail -40 || true
+            exit $GRADLE_EXIT
+          fi
+
+          echo ""
+          echo "── APKs produits ──"
+          find . -name "*.apk" | sort
+          echo "✅ Build réussi"
+
+      # ── Align & Sign APK ─────────────────────────────────────────
+      - name: "✍️ Align and sign APK"
+        run: |
+          # Chercher l'APK debug
+          APK=$(find android-twa -name "*debug*.apk" 2>/dev/null | head -1)
+          [ -z "$APK" ] && APK=$(find android-twa -name "*.apk" 2>/dev/null | grep -v aligned | head -1)
+
+          if [ -z "$APK" ]; then
+            echo "❌ Aucun APK trouvé"
+            find . -name "*.apk" 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "✅ APK source : $APK ($(du -h "$APK" | cut -f1))"
+
+          ZIPALIGN="${ANDROID_SDK_ROOT}/build-tools/${{ env.BUILD_TOOLS }}/zipalign"
+          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${{ env.BUILD_TOOLS }}/apksigner"
+
+          if [ -f "$ZIPALIGN" ]; then
+            $ZIPALIGN -v -p 4 "$APK" odys-aligned.apk && echo "✅ Aligné"
+          else
+            cp "$APK" odys-aligned.apk
+            echo "⚠️  zipalign absent — copie directe"
+          fi
+
+          if [ -f "$APKSIGNER" ]; then
+            $APKSIGNER sign \
+              --ks android.keystore \
+              --ks-pass "pass:${{ env.KEYSTORE_PASS }}" \
+              --ks-key-alias "${{ env.KEYSTORE_ALIAS }}" \
+              --key-pass "pass:${{ env.KEYSTORE_PASS }}" \
+              --out odys-debug.apk odys-aligned.apk
+            echo "✅ APK signé"
+          else
+            mv odys-aligned.apk odys-debug.apk
+            echo "⚠️  apksigner absent"
+          fi
+
+          ls -lh odys-debug.apk
+
+      - name: "📊 Build summary"
+        if: always()
+        run: |
+          echo "════════════════════════════════════════"
+          echo "  Odyssée de la Sagesse — Build v8"
+          echo "  Node   : $(node --version)"
+          echo "  Java   : $(java -version 2>&1 | head -1)"
+          echo "  Gradle : ${{ env.GRADLE_VERSION }}"
+          echo "  AGP    : 8.5.0"
+          echo "  Commit : ${{ github.sha }}"
+          echo "  APKs :"
+          find . -name "*.apk" -maxdepth 8 2>/dev/null | xargs -r ls -lh || echo "  aucun"
+          echo "════════════════════════════════════════"
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: odys-debug-apk-${{ github.run_number }}
+          path: odys-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-twa-project-${{ github.run_number }}
+          path: android-twa/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: "📤 Upload Gradle log"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log-${{ github.run_number }}
+          path: /tmp/gradle.log
+          retention-days: 7
